@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type FormState = {
   asin: string; product: string; category: string; audience: string; price: string; rating: string;
@@ -8,6 +8,25 @@ type FormState = {
 };
 
 type Research = Partial<FormState> & { sources?: { title: string; url: string }[] };
+
+type Opportunity = {
+  id: string; asin: string; product: string; category: string; keyword: string;
+  demand: number; trend: number; intent: number; competition: number; commission: number; gap: number;
+  status: "Idea" | "Shortlisted" | "Drafting"; notes: string;
+};
+
+const opportunityWeights = { demand: 20, trend: 15, intent: 20, competition: 15, commission: 10, gap: 20 };
+const exampleOpportunity: Opportunity = {
+  id: "example", asin: "B0C3HCD34R", product: "Soundcore Q20i Hybrid ANC Headphones",
+  category: "Audio", keyword: "best budget noise cancelling headphones for commuting",
+  demand: 7, trend: 7, intent: 9, competition: 5, commission: 6, gap: 8,
+  status: "Shortlisted", notes: "Strong specific use case. Check the current SERP before publishing.",
+};
+
+function opportunityScore(item: Opportunity) {
+  const positiveCompetition = 11 - item.competition;
+  return Math.round((item.demand * opportunityWeights.demand + item.trend * opportunityWeights.trend + item.intent * opportunityWeights.intent + positiveCompetition * opportunityWeights.competition + item.commission * opportunityWeights.commission + item.gap * opportunityWeights.gap) / 10);
+}
 
 const initial: FormState = {
   asin: "B0C3HCD34R",
@@ -37,7 +56,10 @@ function affiliateUrl(url: string, tag: string) {
 }
 
 export default function Home() {
+  const [view, setView] = useState<"research" | "builder">("research");
   const [form, setForm] = useState<FormState>(initial);
+  const [draftOpportunity, setDraftOpportunity] = useState<Opportunity>({ ...exampleOpportunity, id: "draft", product: "", asin: "", keyword: "", notes: "", status: "Idea" });
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [photos, setPhotos] = useState<string[]>([]);
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [imagePrompt, setImagePrompt] = useState("Show this exact product being used naturally at a tidy home-office desk, realistic editorial photography. Keep its shape, colours, branding and controls accurate.");
@@ -49,6 +71,32 @@ export default function Home() {
   const update = (key: keyof FormState, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const link = useMemo(() => affiliateUrl(form.url, form.tag), [form.url, form.tag]);
   const score = Number(form.rating) || 4.5;
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("ama-opportunities-v1");
+      if (saved) setOpportunities(JSON.parse(saved) as Opportunity[]);
+    } catch { /* Browser storage is optional. */ }
+  }, []);
+
+  useEffect(() => {
+    try { window.localStorage.setItem("ama-opportunities-v1", JSON.stringify(opportunities)); }
+    catch { /* Browser storage is optional. */ }
+  }, [opportunities]);
+
+  function saveOpportunity() {
+    if (!draftOpportunity.product.trim() || !draftOpportunity.keyword.trim()) return;
+    const item = { ...draftOpportunity, id: crypto.randomUUID() };
+    setOpportunities((current) => [item, ...current]);
+    setDraftOpportunity((current) => ({ ...current, id: "draft", product: "", asin: "", keyword: "", notes: "", status: "Idea" }));
+  }
+
+  function buildFromOpportunity(item: Opportunity) {
+    setForm((current) => ({ ...current, asin: item.asin, product: item.product, category: item.category, url: item.asin.length === 10 ? `https://www.amazon.co.uk/dp/${item.asin}` : current.url }));
+    setOpportunities((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "Drafting" } : entry));
+    setView("builder");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   function updateAsin(value: string) {
     const asin = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
@@ -106,8 +154,10 @@ export default function Home() {
   }
 
   return <main>
-    <header className="topbar"><a className="brand" href="#top" aria-label="AMA Review Builder home"><span>ama</span> Review Builder</a><div className="status"><i /> Private draft</div></header>
-    <section className="hero" id="top"><div><p className="eyebrow">Affiliate content, without the faff</p><h1>Turn product facts into a review page that’s ready to publish.</h1><p className="lede">Add what you genuinely know. We’ll shape it into a useful, disclosure-ready review—without inventing hands-on experience.</p></div><div className="hero-card"><strong>Built for honest recommendations</strong><span>Facts in</span><b>→</b><span>Polished review out</span></div></section>
+    <header className="topbar"><a className="brand" href="#top" aria-label="AMA Review Builder home"><span>ama</span> Review Builder</a><nav className="app-nav" aria-label="App sections"><button className={view === "research" ? "active" : ""} onClick={() => setView("research")}>Research</button><button className={view === "builder" ? "active" : ""} onClick={() => setView("builder")}>Page builder</button></nav><div className="status"><i /> Saved on this device</div></header>
+    <section className="hero" id="top"><div><p className="eyebrow">Affiliate research, without the faff</p><h1>{view === "research" ? "Find ideas worth writing before you spend on content." : "Turn product facts into a review page that’s ready to publish."}</h1><p className="lede">{view === "research" ? "Score real evidence, reject weak ideas and move the best opportunities into your writing pipeline." : "Add what you genuinely know. We’ll shape it into a useful, disclosure-ready review—without inventing hands-on experience."}</p></div><div className="hero-card"><strong>{view === "research" ? "A simple publishing pipeline" : "Built for honest recommendations"}</strong><span>{view === "research" ? "Score idea" : "Facts in"}</span><b>→</b><span>{view === "research" ? "Build page" : "Polished review out"}</span></div></section>
+
+    {view === "research" ? <ResearchDashboard draft={draftOpportunity} setDraft={setDraftOpportunity} opportunities={opportunities} onSave={saveOpportunity} onBuild={buildFromOpportunity} onDelete={(id) => setOpportunities((current) => current.filter((item) => item.id !== id))} /> :
 
     <section className="workspace">
       <div className="panel editor">
@@ -143,9 +193,41 @@ export default function Home() {
           <section className="review-themes"><p className="eyebrow">What buyers mention</p><h2>Customer review themes</h2><p>{form.reviewThemes || "Research or add a concise summary of recurring customer feedback."}</p><a href={`${form.url}#customerReviews`} target="_blank" rel="nofollow sponsored noopener">Read customer reviews on Amazon →</a>{sources.length > 0 && <div className="sources"><strong>Research sources</strong>{sources.map((source) => <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.url}>{source.title}</a>)}</div>}</section>
         </article>
       </aside>
-    </section>
+    </section>}
     <footer><span>AMA Review Builder</span><span>Human judgement. Better structure. Clear disclosure.</span></footer>
   </main>;
+}
+
+function ResearchDashboard({ draft, setDraft, opportunities, onSave, onBuild, onDelete }: { draft: Opportunity; setDraft: (item: Opportunity) => void; opportunities: Opportunity[]; onSave: () => void; onBuild: (item: Opportunity) => void; onDelete: (id: string) => void }) {
+  const score = opportunityScore(draft);
+  const update = <K extends keyof Opportunity>(key: K, value: Opportunity[K]) => setDraft({ ...draft, [key]: value });
+  return <section className="research-dashboard">
+    <div className="panel score-editor">
+      <div className="panel-heading"><div><p className="step">01 · Capture evidence</p><h2>Score a product opportunity</h2></div><div className={`score-badge ${score >= 70 ? "strong" : ""}`}><strong>{score}</strong><span>/ 100</span></div></div>
+      <p className="helper">These are your evidence ratings, not made-up keyword data. Use Google Trends, Amazon listings and a manual search until paid SEO tools are connected.</p>
+      <div className="grid two"><Field label="Product name" value={draft.product} onChange={(value) => update("product", value)} /><Field label="ASIN" hint="Optional for now" value={draft.asin} onChange={(value) => update("asin", value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))} /></div>
+      <div className="grid two"><Field label="Category / niche" value={draft.category} onChange={(value) => update("category", value)} /><label><span>Pipeline status</span><select value={draft.status} onChange={(event) => update("status", event.target.value as Opportunity["status"])}><option>Idea</option><option>Shortlisted</option><option>Drafting</option></select></label></div>
+      <Field label="Target keyword" hint="Prefer a specific buyer and use case" value={draft.keyword} onChange={(value) => update("keyword", value)} />
+      <div className="signal-grid">
+        <Signal label="Demand" value={draft.demand} help="Visible interest and searches" onChange={(value) => update("demand", value)} />
+        <Signal label="Trend" value={draft.trend} help="Rising rather than fading" onChange={(value) => update("trend", value)} />
+        <Signal label="Buyer intent" value={draft.intent} help="Close to a purchase" onChange={(value) => update("intent", value)} />
+        <Signal label="Competition" value={draft.competition} help="10 = hardest SERP" onChange={(value) => update("competition", value)} />
+        <Signal label="Commission" value={draft.commission} help="Value per likely sale" onChange={(value) => update("commission", value)} />
+        <Signal label="Content gap" value={draft.gap} help="Room to make something better" onChange={(value) => update("gap", value)} />
+      </div>
+      <TextField label="Evidence and notes" hint="Sources, angles, warnings, competing pages" value={draft.notes} onChange={(value) => update("notes", value)} />
+      <button className="primary save-opportunity" disabled={!draft.product.trim() || !draft.keyword.trim()} onClick={onSave}>Save opportunity</button>
+    </div>
+    <div className="panel pipeline">
+      <div className="panel-heading"><div><p className="step">02 · Publishing pipeline</p><h2>Saved opportunities</h2></div><span className="item-count">{opportunities.length} saved</span></div>
+      {opportunities.length === 0 ? <div className="empty-state"><strong>No ideas saved yet</strong><p>Score your first opportunity. It stays privately in this browser until we add accounts and a database.</p></div> : <div className="opportunity-list">{opportunities.map((item) => { const itemScore = opportunityScore(item); return <article className="opportunity" key={item.id}><div className="opportunity-score"><strong>{itemScore}</strong><span>score</span></div><div className="opportunity-copy"><div className="opportunity-top"><span className={`status-chip ${item.status.toLowerCase()}`}>{item.status}</span><small>{item.category || "Uncategorised"}</small></div><h3>{item.product}</h3><p className="keyword">“{item.keyword}”</p>{item.notes && <p className="opportunity-notes">{item.notes}</p>}<div className="opportunity-actions"><button className="primary" onClick={() => onBuild(item)}>Build page →</button><button className="ghost danger" onClick={() => onDelete(item.id)}>Delete</button></div></div></article>; })}</div>}
+    </div>
+  </section>;
+}
+
+function Signal({ label, value, help, onChange }: { label: string; value: number; help: string; onChange: (value: number) => void }) {
+  return <label className="signal"><span><b>{label}</b><em>{value}/10</em></span><input type="range" min="1" max="10" value={value} onChange={(event) => onChange(Number(event.target.value))} /><small>{help}</small></label>;
 }
 
 function Field({ label, hint, value, onChange }: { label: string; hint?: string; value: string; onChange: (value: string) => void }) {
